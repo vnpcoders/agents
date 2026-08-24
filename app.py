@@ -8,46 +8,34 @@ from datetime import datetime
 st.set_page_config(page_title="Grocery Shop Agent", page_icon="🛒")
 st.title("🛒 Grocery Shop Agent")
 
-# ---------------- SIDEBAR: CONFIG ----------------
-st.sidebar.header("Setup")
-gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
-sheet_url = st.sidebar.text_input("Google Sheet URL")
-sa_json_text = st.sidebar.text_area(
-    "Service Account JSON (paste full content)", height=100
-)
-
-if not (gemini_key and sheet_url and sa_json_text):
-    st.info(
-        "Sidebar me Gemini key, Sheet URL, aur Service Account JSON daal kar shuru karo."
-    )
+# ---------------- CONFIG FROM SECRETS ----------------
+try:
+    gemini_key = st.secrets["GEMINI_API_KEY"]
+    sheet_url = st.secrets["SHEET_URL"]
+    creds_dict = dict(st.secrets["gcp_service_account"])
+except Exception:
+    st.error("secrets.toml me GEMINI_API_KEY, SHEET_URL, aur [gcp_service_account] missing hai.")
     st.stop()
-
 
 # ---------------- GOOGLE SHEETS CONNECTION ----------------
 @st.cache_resource
-def connect_sheet(sa_json_text, sheet_url):
-    creds_dict = json.loads(sa_json_text)
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-    ]
+def connect_sheet(creds_dict, sheet_url):
+    scopes = ["https://www.googleapis.com/auth/spreadsheets",
+              "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
     client = gspread.authorize(creds)
     sheet = client.open_by_url(sheet_url)
     return sheet
 
-
 try:
-    sheet = connect_sheet(sa_json_text, sheet_url)
+    sheet = connect_sheet(creds_dict, sheet_url)
     all_ws = {ws.title.strip().lower(): ws for ws in sheet.worksheets()}
 
     def find_ws(name):
         key = name.strip().lower()
         if key in all_ws:
             return all_ws[key]
-        raise Exception(
-            f"'{name}' tab nahi mili. Available tabs: {list(all_ws.keys())}"
-        )
+        raise Exception(f"'{name}' tab nahi mili. Available tabs: {list(all_ws.keys())}")
 
     products_ws = find_ws("Product Price List")
     qna_ws = find_ws("Question Answer")
@@ -56,33 +44,22 @@ except Exception as e:
     st.error(f"Sheet connect nahi hui: {e}")
     st.stop()
 
-
 @st.cache_data(ttl=60)
 def load_products():
     return products_ws.get_all_records()
-
 
 @st.cache_data(ttl=60)
 def load_qna():
     return qna_ws.get_all_records()
 
-
 products = load_products()
 qna = load_qna()
 
-
 def save_order(customer_name, mobile_number, address, items, total_amount):
-    orders_ws.append_row(
-        [
-            customer_name,
-            mobile_number,
-            address,
-            items,
-            total_amount,
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        ]
-    )
-
+    orders_ws.append_row([
+        customer_name, mobile_number, address, items,
+        total_amount, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ])
 
 # ---------------- GEMINI SETUP ----------------
 genai.configure(api_key=gemini_key)
@@ -111,9 +88,7 @@ Core behavior:
 - Be concise and clear, especially in bills and totals.
 """
 
-model = genai.GenerativeModel(
-    "gemini-3.6-flash", system_instruction=SYSTEM_INSTRUCTIONS
-)
+model = genai.GenerativeModel("gemini-3.6-flash", system_instruction=SYSTEM_INSTRUCTIONS)
 
 # ---------------- CHAT STATE ----------------
 if "chat" not in st.session_state:
